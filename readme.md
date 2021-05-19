@@ -40,7 +40,7 @@ The discourse connect provider secret
 ## $wgDiscourseConnectEnableLocalLogin
 Enable local password login, local password login will be disable by default when enable this extension.
 
-- optional: false
+- optional: true
 - type: boolean
 - default: false
 - eg:
