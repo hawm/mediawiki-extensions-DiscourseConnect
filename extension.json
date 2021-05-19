@@ -1,0 +1,68 @@
+{
+    "name": "DiscourseConnect",
+    "author": "hawm",
+    "url": "",
+    "description": "Implement Discourse Connect for Mediawiki",
+    "version": "0.1",
+    "type": "other",
+    "requires":{
+        "MediaWiki": ">= 1.35"
+    },
+    "AutoloadNamespaces": {
+        "DiscourseConnect\\": "includes/"
+    },
+    "ConfigRegistry": {
+        "discourseconnect": "GlobalVarConfig::newInstance"
+    },
+    "config": {
+        "DiscourseConnectSecret": {
+            "value": null
+        },
+        "DiscourseConnectEndpoint": {
+            "value": null
+        },
+        "DiscourseConnectEnableLocalLogin":{
+            "value": false
+        },
+        "DiscourseConnectEnableLocalProperties":{
+            "value": true
+        },
+        "DiscourseConnectUserMapping": {
+            "value" : null
+        },
+        "DiscourseConnectGroupMapping": {
+            "value" : null
+        }
+    },
+    "MessagesDirs": {
+        "DiscourseConnect": [
+            "i18n"
+        ]
+    },
+    "AuthManagerAutoConfig":{
+        "primaryauth":{
+            "DiscoursePrimaryAuthenticationProvider": {
+                "class": "DiscourseConnect\\DiscoursePrimaryAuthenticationProvider",
+                "sort": 0
+            }
+        }
+    },
+    "ServiceWiringFiles": [
+        "includes/ServiceWiring.php"
+    ],
+    "callback": "DiscourseConnect\\Hook\\Hooks::onRegistration",
+    "Hooks":{
+        "BeforePageDisplay": "DiscourseConnect\\Hook\\Hooks::logTest",
+        "LoadExtensionSchemaUpdates": "CustomizeDatabaseSchema",
+        "AuthChangeFormFields": "CustomizeAuthForm"
+    },
+    "HookHandlers":{
+        "CustomizeDatabaseSchema": {
+            "class": "DiscourseConnect\\Hook\\CustomizeDatabaseSchema"
+        },
+        "CustomizeAuthForm": {
+            "class": "DiscourseConnect\\Hook\\CustomizeAuthForm"
+        }
+    },
+    "manifest_version": 2
+}

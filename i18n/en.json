@@ -1,0 +1,9 @@
+{
+    "discourseconnect-info-login-button-label": "Login with Discourse",
+    "discourseconnect-info-login-button-help": "Using your Discourse account to login",
+    "discourseconnect-info-account-creation-description": "Please Login with Discourse",
+    "discourseconnect-warnning-username-invalid": "You can use this username please input another one",
+    "discourseconnect-warnning-username-exist": "You can use this username please input another one",
+    "discourseconnect-error-no-authentication-workflow": "No Authentication Workflow",
+    "discourseconnect-error-cannot-validate-authentication-return": "Cannot validate authentication data"
+}
