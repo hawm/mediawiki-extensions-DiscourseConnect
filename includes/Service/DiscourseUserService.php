@@ -28,7 +28,7 @@ class DiscourseUserService{
     }
 
     public function newUserFromExternalId($discourseExternalId){
-
+        // load user mapping first
         $user_mapping = $this->getUserMapping();
         if (is_array($user_mapping) &&
             $mediawiki_user_name = $user_mapping[$discourseExternalId] ?? null){
@@ -57,7 +57,8 @@ class DiscourseUserService{
         $DiscourseExternalId, 
         bool $update=false
         ){
-        // TODO: support update
+        // TODO: support update linked user
+        // TODO: support connection mode 
         $dbw = $this->loadBalancer->getConnectionRef(DB_MASTER);
         $ret = $dbw->insert(
             'discourse_user',
@@ -68,7 +69,7 @@ class DiscourseUserService{
             __METHOD__
             );
         return $ret;
-        // TODO: do something when $ret==false that unable link user
+        // TODO: do something when $ret==false that link user failed
     }
 
     public function unlinkUser(UserIdentity $user){
@@ -82,4 +83,6 @@ class DiscourseUserService{
             );
         return $ret;
     }
+
+    // TODO populate other user properties like email or realname
 }
