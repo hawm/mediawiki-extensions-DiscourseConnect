@@ -1,3 +1,9 @@
 {
-    
+    "dc-info-discourseauth-label": "使用Discourse登录",
+    "dc-info-discourseauth-help": "使用你的Discours账户登录",
+    "dc-info-account-creation-description": "请使用Discourse登录",
+    "dc-warnning-username-invalid": "用户名无效，请重新输入",
+    "dc-warnning-username-exist": "该用户名已存在，请重新输入",
+    "dc-error-no-authentication-workflow": "认证流程无效",
+    "dc-error-cannot-validate-authentication-return": "无法验证认证数据"
 }

@@ -2,52 +2,82 @@
 
 namespace DiscourseConnect;
 
+use DiscourseConnect\Request\DiscourseAuthRequest;
+use DiscourseConnect\Request\DiscourseReturnRequest;
 use MediaWiki\Auth\AbstractPrimaryAuthenticationProvider;
-use MediaWiki\Auth\UserDataAuthenticationRequest;
 use MediaWiki\Auth\AuthenticationResponse;
 use MediaWiki\Auth\AuthenticationRequest;
-use MediaWiki\Auth\UsernameAuthenticationRequest;
 use MediaWiki\Auth\AuthManager;
-use Mediawiki\MediaWikiServices;
+use Mediawiki\User\UserNameUtils;
+use SpecialPage;
+use Wikimedia\Rdbms\ILoadBalancer;
+use MediaWiki\User\UserFactory;
 
+use DiscourseConnect\Service\DiscourseConnectConsumer;
+use DiscourseConnect\Service\DiscourseUserService;
+// TODO: ensure DiscourseConnecdisocurseConnectConsumert
 
-// TODO: ensure DiscourseConnectConsumer
 // TODO: ensure schema
 // TODO: catch possible exception throw
 // TODO: support user properties groups, email, realname
-class DiscoursePrimaryAuthenticationProvider extends AbstractPrimaryAuthenticationProvider{
-    const USERDATA_SESSION_KEY = 'DiscourseUserData';
+class DiscoursePrimaryAuthenticationProvider extends AbstractPrimaryAuthenticationProvider
+{
+    const USERDATA_SESSION_KEY = 'DiscourseUserdata';
 
-    protected function getDiscourseConnectConsumer(){
-        return DiscourseServices::getDiscourseConnectConsumer();
+    protected $disocurseConnectConsumer;
+    protected $discourseUserService;
+    protected $userFactory;
+    protected $userNameUtils;
+    protected $loadBalancer;
+    
+
+    public function __construct(
+        UserNameUtils $userNameUtils,
+        ILoadBalancer $loadBalancer,
+        UserFactory $userFactory,
+        DiscourseConnectConsumer $disocurseConnectConsumer,
+        DiscourseUserService $discourseUserService
+    ) {
+        $this->disocurseConnectConsumer = $disocurseConnectConsumer;
+        $this->discourseUserService = $discourseUserService;
+        $this->userFactory = $userFactory;
+        $this->userNameUtils = $userNameUtils;
+        $this->loadBalancer = $loadBalancer;
     }
 
-    protected function getDiscourseUserService(){
-        return DiscourseServices::getDiscourseUserService();
-    }
 
-    protected function getDiscourseGroupService(){
-        return DiscourseServices::getDiscourseGroupService();
-    }
-
-    protected function getUserFactory(){
-        return MediaWikiServices::getInstance()->getUserFactory();
-    }
-
-
-    public function getAuthenticationRequests($action, array $options){
-        // add login form to Special::UserLogin
-        switch($action){
+    public function getAuthenticationRequests($action, array $options)
+    {
+        switch ($action) {
             case AuthManager::ACTION_LOGIN:
                 return [
-                    new Request\DiscourseBeginPrimaryAuthenticationRequest()
+                    new Request\DiscourseAuthRequest(
+                        'UserLogin',
+                        'wpLoginToken',
+                        'discourseauth',
+                        false
+                    )
                 ];
             case AuthManager::ACTION_CREATE:
-                if(!$this->config->get('DiscourseConnectEnableLocalLogin')){
+                if (!$this->config->get('DiscourseConnectEnableLocalLogin')) {
                     return [
-                        new Request\DiscourseBeginPrimaryAccountCreationRequest()
+                        new Request\DiscourseAccountCreationRequest()
                     ];
                 }
+            case AuthManager::ACTION_LINK:
+                $linked = $this->testUserCanAuthenticate($options['username']);
+                return [
+                    new Request\DiscourseAuthRequest(
+                        'LinkAccounts',
+                        'wpAuthToken',
+                        $linked ? 'discourselinked' : 'discourselink',
+                        false,
+                        $linked ?: false
+                    )
+                ];
+            case AuthManager::ACTION_REMOVE:
+                return $this->testUserCanAuthenticate($options['username']) ?
+                    [new Request\DiscourseDeauthRequest('discoureunlink')] : [];
             default:
                 return [];
         }
@@ -55,181 +85,234 @@ class DiscoursePrimaryAuthenticationProvider extends AbstractPrimaryAuthenticati
 
     // authentication
 
-    public function beginPrimaryAuthentication( array $reqs ){
-        // handle form submission what we return by getAuthenticationRequests
-        $request = Request\DiscourseBeginPrimaryAuthenticationRequest::getRequest($reqs);
-        if(!$request){
-            return AuthenticationResponse::newAbstain();
-        }
-        $user_login_page = \SpecialPage::getTitleFor('Userlogin');
-        $return_to_url = $user_login_page->getSubpage('return')->getFullURL();
-        $encoded_return_to_url = urlencode($return_to_url); // support non-ascii url
-        /* 
-        * Token is not necessary for DiscourseConnect provider but Mediawiki AuthManager.
-        * Token be use to fit with the CSRF protection in default login flow at Special:UserLogin
-        * which one of the AuthManagerSpecialPage family.
-        * Maybe we can hide the token by load it from AuthenticationRequest->loadFromSubmission.
-        * Token be pre-encode cause of the `+` sign in url encode/decode implementation 
-        * are different between Mediawiki AuthManager(PHP urlencode/decode) and 
-        * DiscourseConnect(Ruby URI lib).
-        * If we redirect to a custom SpecialPage which not inherit from anyone of the
-        * AuthManagerSpecialPage family rather the default Special:UserLogin,
-        * then we would manual process just what we need, we don't need token. see
-        * https://github.com/wikimedia/mediawiki-extensions-PluggableAuth/blob/master/includes/PluggableAuthPrimaryAuthenticationProvider.php
-        */ 
-        global $wgRequest;
-        $token = $wgRequest->getSession()->getToken('', 'login');
-        $encodedToken = str_replace('+', '%252B', $token);
-        $return_to_url_with_token = "$encoded_return_to_url?wpLoginToken=$encodedToken";
-        $consumer = $this->getDiscourseConnectConsumer();
-        $nonce = null;
-        return AuthenticationResponse::newRedirect(
-            [new Request\DiscourseReturnAuthenticationRequest()],
-            $consumer->getAuthUrl($return_to_url_with_token)
-        );
-        // TODO: handle the `return_to` query
+    public function beginPrimaryAuthentication(array $reqs)
+    {
+        return $this->beginAuthentication($reqs);
     }
 
-    public function continuePrimaryAuthentication( array $reqs ){
-        if ($request = Request\DiscourseReturnAuthenticationRequest::getRequest($reqs)){
-            // accept Discourse return
-            $userdata = null;
-            if (!$this->getDiscourseConnectConsumer()->loadAuthData(
-                $request->sso, $request->sig, $userdata)){
-                return AuthenticationResponse::newFail(
-                    wfMessage('discourseconnect-error-cannot-validate-authentication-return')
-                );
-            }
-            // preserve $userdata to session for late using
-            $this->manager->setAuthenticationSessionData(
-                self::USERDATA_SESSION_KEY, $userdata
-            );
-    
-            $user = $this->getDiscourseUserService()->newUserFromExternalId(
-                $userdata['external_id']
-            );
-            // When user exist
-            if($user && $user->isRegistered()){
-                return AuthenticationResponse::newPass($user->getName());
-            }
-            // TODO: find user by same email
-            // When new user
-            $username = $userdata['username'];
-            $user = $this->getUserFactory()->newFromName($username);
-        }elseif($request = Request\DiscourseUsernameAuthenticationRequest::getRequest($reqs)){
-            // accept new username
-            $username = $request->username;
-            $user = $this->getUserFactory()->newFromName($username);
-        }else{
-            // somthing wrong
+    public function continuePrimaryAuthentication(array $reqs)
+    {
+        $userdata = null;
+        $error = $this->continueAuthentication($reqs, $userdata);
+        if ($error) {
+            return $error;
+        }
+        $mId = $this->discourseUserService->getUserIdByExternalId($userdata['external_id']);
+        $user = $this->userFactory->newFromId($mId);
+        if ($user && $user->isRegistered()) {
+            // when exist linked user
+            return AuthenticationResponse::newPass($user->getName());
+        }
+        $username = $userdata['username'];
+        if ($this->testUserExists($username)) {
+            // username exist but not link with the current Discoruse user,
+            // we may prompt user to input a new username in the future
             return AuthenticationResponse::newFail(
-                wfMessage('discourseconnect-error-no-authentication-workflow')
+                wfMessage('dc-error-username-exist')
             );
         }
+        // local user will be auto-create then be link to Discourse user
+        // by autoCreatedAccount()
+        return AuthenticationResponse::newPass($username);
+    }
 
-        if(!$user){
-            $errorMessage = 'discourseconnect-wraning-username-invalid';
-        }elseif($user->isRegistered()){
-            $errorMessage = 'discourseconnect-warnning-username-exist';
-        }else{
-            $errorMessage = null;
+    public function postAuthentication($user, AuthenticationResponse $response)
+    {
+    }
+
+    public function testUserExists($username, $flags = \User::READ_NORMAL)
+    {
+        // copy from LocalPasswordPrimaryAuthenticationProvider::testUserExists
+        $username = $this->userNameUtils->getCanonical($username, UserNameUtils::RIGOR_USABLE);
+        if ($username === false) {
+            return false;
         }
-        if($errorMessage){
-            return AuthenticationResponse::newUI(
-                [new Request\DiscourseUsernameAuthenticationRequest($username)],
-                wfMessage($errorMessage)
-            );
+
+        list($db, $options) = \DBAccessObjectUtils::getDBOptions($flags);
+        return (bool)$this->loadBalancer->getConnectionRef($db)->selectField(
+            ['user'],
+            'user_id',
+            ['user_name' => $username],
+            __METHOD__,
+            $options
+        );
+    }
+
+    public function testUserCanAuthenticate($username)
+    {
+        $username = $this->userNameUtils->getCanonical($username, UserNameUtils::RIGOR_USABLE);
+        if ($username === false) {
+            return false;
         }
-
-        return AuthenticationResponse::newPass($user->getName());
-    }
-
-    public function postAuthentication( $user, AuthenticationResponse $response ){
-        // TODO: update userdata eacho login
-    }
-
-    public function testUserExists( $username, $flags =\User::READ_NORMAL ){
-        // TODO: provider use to reserve username
-    }
-
-    public function testUserCanAuthenticate( $username ){
-        return true;
+        return (bool) $this->discourseUserService->getExternalIdByUserName($username);
     }
 
     // provider 
-    
-    public function providerNormalizeUsername( $username ){}
 
-    public function providerRevokeAccessForUser( $username ){}
+    public function providerNormalizeUsername($username)
+    {
+    }
 
-    public function providerAllowsPropertyChange( $property ){
+    public function providerRevokeAccessForUser($username)
+    {
+    }
+
+    public function providerAllowsPropertyChange($property)
+    {
+        return true;
     }
 
     public function providerAllowsAuthenticationDataChange(
-        AuthenticationRequest $req, $checkData = true
-    ){
-        return \StatusValue::newGood('ignored');
+        AuthenticationRequest $req,
+        $checkData = true
+    ) {
+        // TODO: allow disable data change
+        return \StatusValue::newGood();
     }
 
-    public function providerChangeAuthenticationData( AuthenticationRequest $req ){}
+    public function providerChangeAuthenticationData(AuthenticationRequest $req)
+    {
+        if ($req->action == AuthManager::ACTION_CHANGE) {
+            // TODO: ??
+        } elseif ($req->action == AuthManager::ACTION_REMOVE) {
+            // unlink user
+            $user = $this->manager->getRequest()->getSession()->getUser();
+            $this->discourseUserService->unlinkUserByUserId($user->getId());
+        }
+    }
 
     // account create
 
-    public function accountCreationType(){
+    public function accountCreationType()
+    {
         return self::TYPE_LINK;
     }
 
-    public function testForAccountCreation( $user, $creator, array $reqs ){
+    public function testForAccountCreation($user, $creator, array $reqs)
+    {
+        // we can prevent account creation here
         return \StatusValue::newGood();
     }
 
-    public function beginPrimaryAccountCreation( $user, $creator, array $reqs ){
-        // we display our customize form but don't really support account creation 
+    public function beginPrimaryAccountCreation($user, $creator, array $reqs)
+    {
+        // we display our custom form but don't really support account creation 
         return AuthenticationResponse::newAbstain();
     }
 
-    public function continuePrimaryAccountCreation( $user, $creator, array $reqs ){}
+    public function continuePrimaryAccountCreation($user, $creator, array $reqs)
+    {
+    }
 
-    public function finishAccountCreation( $user, $creator, AuthenticationResponse $response ){}
+    public function finishAccountCreation($user, $creator, AuthenticationResponse $response)
+    {
+    }
 
-    public function postAccountCreation( $user, $creator, AuthenticationResponse $response ){}
+    public function postAccountCreation($user, $creator, AuthenticationResponse $response)
+    {
+    }
 
-    public function testUserForCreation( $user, $autocreate, array $options = [] ){
+    public function testUserForCreation($user, $autocreate, array $options = [])
+    {
         return \StatusValue::newGood();
     }
 
-    public function autoCreatedAccount( $user, $source ){
-        $userdata = $this->manager->getAuthenticationSessionData(
-            self::USERDATA_SESSION_KEY
-        );
-        $ret = $this->getDiscourseUserService()->linkUser(
-            $user,
-            $userdata['external_id']
-        );
-        if(!$ret){
-            /* IMPORTANT
-            * Delete the which just created user when associate failed,
-            * but it may cause unknow error.
-            * Whatever we need to do something otherwise username
-            * will be occupy when code running reach here each time.
-            */ 
-            wfDebug('DiscourseConnect', "Unable associate account");
-            return;
-        }
+    public function autoCreatedAccount($user, $source)
+    {
+        $this->trylinkUser($user);
     }
 
     // account link
 
-    public function beginPrimaryAccountLink( $user, array $reqs ){
+    public function beginPrimaryAccountLink($user, array $reqs)
+    {
+        return $this->beginAuthentication($reqs);
+    }
+
+    public function continuePrimaryAccountLink($user, array $reqs)
+    {
+        $userdata = null;
+        $error = $this->continueAuthentication($reqs, $userdata);
+        if ($error) {
+            return $error;
+        }
+        $linked = $this->tryLinkUser($user, $userdata['external_id']);
+        if (!$linked) {
+            return AuthenticationResponse::newFail(
+                new \Message('dc-error-unable-link-account')
+            );
+        }
+        return AuthenticationResponse::newPass();
+    }
+
+    public function postAccountLink($user, AuthenticationResponse $response)
+    {
         // TODO
     }
 
-    public function continuePrimaryAccountLink( $user, array $reqs ){
-        // TODO
+    public function beginAuthentication(array $reqs)
+    {
+        $req = DiscourseAuthRequest::getRequest($reqs);
+        if (!$req) {
+            return AuthenticationResponse::newAbstain();
+        }
+        $callbackTitle = SpecialPage::getTitleFor(
+            $req->pageName,
+            'return'
+        );
+        //  Token is not necessary for DiscourseConnect but Mediawiki AuthManager, 
+        //  we may create our own special page to avoid it in the future.
+        //  See AuthManagerSpecialPage::trySubmit, SpecialUserLogin::getToken,
+        //  SpecialUserLogin::getTokenName and SpecialUserLogin::canByPassForm.
+
+        $callbackUrl = $callbackTitle->getFullUrlForRedirect(
+            $this->manager->getRequest()->getValues(
+                $req->tokenName,
+                'returnto',
+                'returntoquery'
+            )
+        );
+        // TODO: make token adapt with when canBypassForm return true
+        // We now load token from addition form submission, when canBypassForm
+        // we don't need addition form submit so we unable to load token
+        return AuthenticationResponse::newRedirect(
+            [new DiscourseReturnRequest()],
+            $this->disocurseConnectConsumer->getAuthUrl($callbackUrl)
+        );
     }
 
-    public function postAccountLink( $user, AuthenticationResponse $response ){
-        // TODO
+    public function continueAuthentication(array $reqs, &$userdata = null)
+    {
+        $req = Request\DiscourseReturnRequest::getRequest($reqs);
+        if (!$req) {
+            return AuthenticationResponse::newFail(
+                wfMessage('dc-error-no-authentication-workflow')
+            );
+        }
+        $userdata = $this->disocurseConnectConsumer->loadAuthData(
+            $req->sso,
+            $req->sig,
+        );
+        if (!$userdata) {
+            return AuthenticationResponse::newFail(
+                wfMessage('dc-error-cannot-validate-authentication-return')
+            );
+        }
+        $this->manager->setAuthenticationSessionData(
+            self::USERDATA_SESSION_KEY,
+            $userdata
+        );
     }
 
+    public function tryLinkUser($user, $eId = null)
+    {
+        if (!$eId) {
+            $userdata = $this->manager->getAuthenticationSessionData(
+                self::USERDATA_SESSION_KEY
+            );
+            $eId = $userdata['external_id'];
+        }
+
+        return $this->discourseUserService->linkUserById($user->getId(), $eId);
+    }
 }

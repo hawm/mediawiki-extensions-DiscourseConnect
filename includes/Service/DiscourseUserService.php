@@ -2,87 +2,113 @@
 
 namespace DiscourseConnect\Service;
 
+use Config;
 use Wikimedia\Rdbms\ILoadBalancer;
-use MediaWiki\User\UserFactory;
-use MediaWiki\User\UserGroupManager;
-use MediaWiki\User\UserIdentity;
 
-class DiscourseUserService{
+class DiscourseUserService
+{
+    const TABLE_NAME = 'discourse_user';
+    const TABLE = [
+        'mid' => 'mediawiki_user_id',
+        'eid' => 'discourse_external_id'
+    ];
+
+    protected $loadBalancer;
+    protected $userFactory;
+    protected $config;
+
     public function __construct(
-        \Config $config,
-        ILoadBalancer $loadBalancer, 
-        UserFactory $userFactory
-        ){
+        Config $config,
+        ILoadBalancer $loadBalancer
+    ) {
         $this->loadBalancer = $loadBalancer;
-        $this->userFactory = $userFactory;
         $this->config = $config;
     }
 
-    public function getUserMapping(){
-        /* 
-        * Don't set default value as array in extension.json 
-        * to avoid `id` array key be convert to numberic array key 
-        * when call array_merge by MediaWiki core that to load config
-        */
-        return $this->config->get('DiscourseConnectUserMapping');
-    }
-
-    public function newUserFromExternalId($discourseExternalId){
-        // load user mapping first
-        $user_mapping = $this->getUserMapping();
-        if (is_array($user_mapping) &&
-            $mediawiki_user_name = $user_mapping[$discourseExternalId] ?? null){
-            wfDebug('discourseconnect', "Try to login mapping user 
-            external_id = $discourseExternalId, username = $mediawiki_user_name");
-            return $this->userFactory->newFromName($mediawiki_user_name);
-        }else{
-            wfDebug('discourseconnect', 'Config `DiscourseConnectUserMapping` not array');
-        }
-        $dbr = $this->loadBalancer->getConnectionRef(DB_REPLICA);
-        $mediawiki_user_id = $dbr->selectField(
-            'discourse_user',
-            'mediawiki_user_id',
-            "discourse_external_id = $discourseExternalId",
+    public function getUserIdByExternalId(int $eId): int
+    {
+        $dbr = $this->getConnection();
+        $mId = $dbr->selectField(
+            self::TABLE_NAME,
+            self::TABLE['mid'],
+            [
+                self::TABLE['eid'] => $eId
+            ]
         );
-        if(!$mediawiki_user_id){
-            wfDebug('discourseconnect', "No exist user with 
-            discourse_external_id = $discourseExternalId");
-            return null;
-        }
-        return $this->userFactory->newFromId($mediawiki_user_id);
+        return $mId;
     }
 
-    public function linkUser(
-        UserIdentity $user, 
-        $DiscourseExternalId, 
-        bool $update=false
-        ){
-        // TODO: support update linked user
-        // TODO: support connection mode 
-        $dbw = $this->loadBalancer->getConnectionRef(DB_MASTER);
+
+    public function getExternalIdByUserId(int $mId): int
+    {
+        $dbr = $this->getConnection();
+        $eId = $dbr->selectField(
+            self::TABLE_NAME,
+            self::TABLE['eid'],
+            [
+                self::TABLE['mid'] => $mId
+            ]
+        );
+
+        return $eId;
+    }
+
+    public function getExternalIdByUserName($username): int
+    {
+        $dbr = $this->getConnection();
+        $mId = $dbr->selectField(
+            'user',
+            'user_id',
+            [
+                'user_name' => $username,
+            ]
+        );
+        $eId = $this->getExternalIdByUserId($mId);
+        return $eId;
+    }
+
+    public function linkUserById(int $mId, int $eId): bool
+    {
+        $dbw = $this->getConnection(true);
         $ret = $dbw->insert(
-            'discourse_user',
+            self::TABLE_NAME,
             [
-                'mediawiki_user_id' => $user->getId(),
-                'discourse_external_id' => $DiscourseExternalId
+                self::TABLE['mid'] => $mId,
+                self::TABLE['eid'] => $eId
             ],
-            __METHOD__
-            );
+        );
         return $ret;
-        // TODO: do something when $ret==false that link user failed
     }
 
-    public function unlinkUser(UserIdentity $user){
-        $dbw = $this->loadBalancer->getConnectionRef(DB_MASTER);
+    public function unlinkUserByUserId(int $mId): bool
+    {
+        $dbw = $this->getConnection(true);
         $ret = $dbw->delete(
-            'discourse_user',
+            self::TABLE_NAME,
             [
-                'mediawiki_user_id' => $user->getId()
+                self::TABLE['mid'] => $mId
             ],
-            __METHOD__
-            );
+        );
         return $ret;
     }
+
+    public function unlinkUserByExternalId(int $eId): bool
+    {
+        $dbw = $this->getConnection(true);
+        $ret = $dbw->delete(
+            self::TABLE_NAME,
+            [
+                self::TABLE['eid'] => $eId
+            ],
+        );
+        return $ret;
+    }
+
+    protected function getConnection($write = false)
+    {
+        return $this->loadBalancer->getConnectionRef($write ? DB_PRIMARY : DB_REPLICA);
+    }
+
 
     // TODO populate other user properties like email or realname
 }

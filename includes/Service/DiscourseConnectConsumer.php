@@ -2,27 +2,39 @@
 
 namespace DiscourseConnect\Service;
 
-use Mediawiki\MediawikiServices;
-use MediaWiki\Auth\AuthManager ;
+use Config;
+use MediaWiki\Logger\LoggerFactory;
 
 // https://meta.discourse.org/t/using-discourse-as-an-identity-provider-sso-discourseconnect/32974
-class DiscourseConnectConsumer {
-    const NONCE_SESSION_KEY = 'DiscourseConnectNonce';
+class DiscourseConnectConsumer
+{
+    const SESSION_KEYS = [
+        'nonce' => 'DiscourseConnectNonce',
+        'userdata' => 'DiscourseConnectUserdata'
+    ];
     const USERDATA_KEYS = [
         // keys that we need from userdata
     ];
 
-    public function __construct(\Config $config, AuthManager $manager){
-        $this->config = $config;
-        $this->manager = $manager;
+    protected $logger;
+    protected $endpoint;
+    protected $secret;
+    protected $session;
+
+
+    function __construct(Config $config)
+    {
         $this->endpoint = $config->get('DiscourseConnectEndpoint');
         $this->secret = $config->get('DiscourseConnectSecret');
-        // TODO: check endpoint and secret are provide
+        // TODO: check endpoint and secret
+        $this->logger = LoggerFactory::getInstance('DiscourseConnect');
     }
 
-    public function getAuthUrl($returnToUrl){
+    function getAuthUrl($callbackUrl)
+    {
+        $encodedCallbackUrl = urlencode($callbackUrl); // support non-ascii char in url
         $nonce = $this->getRandomNonce(true);
-        $payload = "nonce=$nonce&return_sso_url=$returnToUrl";
+        $payload = "nonce=$nonce&return_sso_url=$encodedCallbackUrl";
         $base64_encoded_payload = base64_encode($payload);
         $url_encoded_payload = urlencode($base64_encoded_payload);
         $hex_signature = $this->sign($base64_encoded_payload);
@@ -31,44 +43,59 @@ class DiscourseConnectConsumer {
     }
 
 
-    // TODO: maybe we can move this to 
+    // TODO: maybe we can call this in
     // DiscourseReturnAuthenticationRequest->loadFormSubmission
-    public function loadAuthData($sso, $sig, &$userdata){
-        // verify sso signature
-        if (!$this->sign($sso) === $sig){
-            wfDebug('DiscourseConnect', 'Return `sig` not match');
+    function loadAuthData($sso, $sig)
+    {
+        // verify signature
+        if ($this->sign($sso) !== $sig) {
+            $this->logger->info('Return `sig` not match');
             return false;
         }
-        // verify nonce
+        $userdata = null;
         parse_str(base64_decode($sso), $userdata);
-        if(!$userdata['nonce'] || !$userdata['nonce'] === $this->getSessionNonce()){
-            wfDebug('DiscourseConnect', 'Return `nonce` not match');
+        // verify nonce
+        if ($userdata['nonce'] !== $this->getPersistedNonce()) {
+            $this->logger->info('Return `nonce` not match');
             return false;
         }
-        // TODO: make sure $userdata fit our requirement
-        return true;
+        // TODO: make sure $userdata fit our requirements
+        return $userdata;
     }
 
-    protected function sign($sso){
-        // we don't do hex-bin convert here cause of PHP return hex string by default
+    function sign($sso)
+    {
         return hash_hmac('sha256', $sso, $this->secret);
     }
 
-    // TODO: using Session->getToken instead
-    protected function getRandomNonce($save=false){
-        $nonce = hash( 'md5', mt_rand() . time() );
-        if ($save){
-            // save to session
-            $this->manager->setAuthenticationSessionData(
-                self::NONCE_SESSION_KEY, $nonce
-            );
+
+    protected  function getRandomNonce($persist = false)
+    {
+        $nonce = hash('md5', mt_rand() . time());
+        if ($persist) {
+            $this->persistNonce($nonce);
         }
         return $nonce;
     }
 
-    protected function getSessionNonce(){
-        return $this->manager->getAuthenticationSessionData(
-            self::NONCE_SESSION_KEY
+    protected function persistNonce($nonce)
+    {
+        global $wgRequest;
+        $response = $wgRequest->response();
+        if ($response->headersSent()) {
+            // Can't do anything now
+            $this->logger->debug(__METHOD__ . ': Headers already sent');
+            return;
+        }
+        $response->setcookie(
+            'nonce',
+            $nonce
         );
+    }
+
+    function getPersistedNonce()
+    {
+        global $wgRequest;
+        return $wgRequest->getCookie('nonce');
     }
 }

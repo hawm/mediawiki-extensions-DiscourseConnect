@@ -6,52 +6,76 @@ use MediaWiki\SpecialPage\Hook\AuthChangeFormFieldsHook;
 use MediaWiki\Auth\AuthManager;
 use DiscourseConnect\Request;
 
-class CustomizeAuthForm implements AuthChangeFormFieldsHook {
-    public function onAuthChangeFormFields(
-        $reqs, $fieldInfo, &$formDescriptor, $action
-        ){
-            switch($action){
-                case AuthManager::ACTION_LOGIN:
-                    $this->resortLoginButton($formDescriptor);
-                    $this->removeRemberMeOption($formDescriptor);
-                    break;
-                case AuthManager::ACTION_CREATE:
-                    $this->removeDefaultCreationFields($reqs, $formDescriptor);
-                    break;
-            }
-    }
+use function GuzzleHttp\default_ca_bundle;
 
-    public function resortLoginButton(&$formDescriptor){
-        if(isset($formDescriptor['discourseconnectlogin'])){
-            $formDescriptor['discourseconnectlogin']['weight'] = 101;
+class CustomizeAuthForm implements AuthChangeFormFieldsHook
+{
+    public function onAuthChangeFormFields(
+        $reqs,
+        $fieldInfo,
+        &$formDescriptor,
+        $action
+    ) {
+        switch ($action) {
+            case AuthManager::ACTION_LOGIN:
+                $this->sortLoginButton($formDescriptor);
+                $this->removeRemberMeOption($formDescriptor);
+                break;
+            case AuthManager::ACTION_CREATE:
+                $this->removeDefaultCreationFields($reqs, $formDescriptor);
+                break;
+            case AuthManager::ACTION_LINK:
+                $this->disableAuthButton($reqs, $formDescriptor);
+                break;
+            default:
         }
     }
 
-    public function removeRemberMeOption(&$formDescriptor){
+    public function sortLoginButton(&$formDescriptor)
+    {
+        if (isset($formDescriptor['discourseauth'])) {
+            $formDescriptor['discourseauth']['weight'] = 101;
+        }
+    }
+
+    public function removeRemberMeOption(&$formDescriptor)
+    {
         // TODO: capitable with the defautl remberMe option from AuthManager
-        if(!$GLOBALS['wgDiscourseConnectEnableLocalLogin']){
+        if (!$GLOBALS['wgDiscourseConnectEnableLocalLogin']) {
             unset($formDescriptor['rememberMe']);
         }
     }
 
 
-    public function removeDefaultCreationFields($reqs, &$formDescriptor){
-        if($GLOBALS['wgDiscourseConnectEnableLocalLogin']){
+    public function removeDefaultCreationFields($reqs, &$formDescriptor)
+    {
+        if ($GLOBALS['wgDiscourseConnectEnableLocalLogin']) {
             return;
         }
-        $request = Request\DiscourseBeginPrimaryAccountCreationRequest::getRequest($reqs);
-        if(!$request){
+        $req = Request\DiscourseAccountCreationRequest::getRequest($reqs);
+        if (!$req) {
             return;
         }
         // keep our customize fields only
-        $preservedFields = array_keys($request->getFieldInfo());
+        $preservedFields = array_keys($req->getFieldInfo());
         $formDescriptor = array_filter(
             $formDescriptor,
-            function ($key) use($preservedFields){
+            function ($key) use ($preservedFields) {
                 return in_array($key, $preservedFields);
             },
             ARRAY_FILTER_USE_KEY
         );
     }
 
+    public function disableAuthButton($reqs, &$formDescriptor)
+    {
+        $req = Request\DiscourseAuthRequest::getRequest($reqs);
+        if (!$req || !$req->disabled) {
+            return;
+        }
+        $buttonName = $req->getName();
+        if (isset($formDescriptor[$buttonName])) {
+            $formDescriptor[$buttonName]['disabled'] = true;
+        }
+    }
 }

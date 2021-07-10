@@ -1,9 +1,9 @@
 {
-    "discourseconnect-info-login-button-label": "Login with Discourse",
-    "discourseconnect-info-login-button-help": "Using your Discourse account to login",
-    "discourseconnect-info-account-creation-description": "Please Login with Discourse",
-    "discourseconnect-warnning-username-invalid": "You can use this username please input another one",
-    "discourseconnect-warnning-username-exist": "You can use this username please input another one",
-    "discourseconnect-error-no-authentication-workflow": "No Authentication Workflow",
-    "discourseconnect-error-cannot-validate-authentication-return": "Cannot validate authentication data"
+    "dc-info-discourseauth-label": "Login with Discourse",
+    "dc-info-discourseauth-help": "Using your Discourse account to login",
+    "dc-info-account-creation-description": "Please Login with Discourse",
+    "dc-warnning-username-invalid": "Username invalid, please input another one",
+    "dc-warnning-username-exist": "Username exist, please input another one",
+    "dc-error-no-authentication-workflow": "No authentication workflow",
+    "dc-error-cannot-validate-authentication-return": "Cannot validate authentication data"
 }

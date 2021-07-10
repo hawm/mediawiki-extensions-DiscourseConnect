@@ -5,7 +5,7 @@
     "description": "Implement Discourse Connect for Mediawiki",
     "version": "0.1",
     "type": "other",
-    "requires":{
+    "requires": {
         "MediaWiki": ">= 1.35"
     },
     "AutoloadNamespaces": {
@@ -21,17 +21,31 @@
         "DiscourseConnectEndpoint": {
             "value": null
         },
-        "DiscourseConnectEnableLocalLogin":{
+        "DiscourseConnectEnableLocalLogin": {
             "value": false
         },
-        "DiscourseConnectEnableLocalProperties":{
+        "DiscourseConnectEnableLocalProperties": {
             "value": true
         },
         "DiscourseConnectUserMapping": {
-            "value" : null
+            "value": null
         },
         "DiscourseConnectGroupMapping": {
-            "value" : null
+            "value": null
+        }
+    },
+    "AuthManagerAutoConfig": {
+        "primaryauth": {
+            "DiscourseConnect": {
+                "class": "DiscourseConnect\\DiscoursePrimaryAuthenticationProvider",
+                "services": [
+                    "UserNameUtils",
+                    "DBLoadBalancer",
+                    "UserFactory",
+                    "DiscourseConnectConsumer",
+                    "DiscourseUserService"
+                ]
+            }
         }
     },
     "MessagesDirs": {
@@ -39,24 +53,17 @@
             "i18n"
         ]
     },
-    "AuthManagerAutoConfig":{
-        "primaryauth":{
-            "DiscoursePrimaryAuthenticationProvider": {
-                "class": "DiscourseConnect\\DiscoursePrimaryAuthenticationProvider",
-                "sort": 0
-            }
-        }
-    },
     "ServiceWiringFiles": [
         "includes/ServiceWiring.php"
     ],
     "callback": "DiscourseConnect\\Hook\\Hooks::onRegistration",
-    "Hooks":{
-        "BeforePageDisplay": "DiscourseConnect\\Hook\\Hooks::logTest",
-        "LoadExtensionSchemaUpdates": "CustomizeDatabaseSchema",
-        "AuthChangeFormFields": "CustomizeAuthForm"
+    "Hooks": {
+        "BeforePageDisplay": "DiscourseConnect\\Hook\\Hooks::log",
+        "AuthChangeFormFields": "CustomizeAuthForm",
+        "LoadExtensionSchemaUpdates": "CustomizeDatabaseSchema"
+
     },
-    "HookHandlers":{
+    "HookHandlers": {
         "CustomizeDatabaseSchema": {
             "class": "DiscourseConnect\\Hook\\CustomizeDatabaseSchema"
         },
