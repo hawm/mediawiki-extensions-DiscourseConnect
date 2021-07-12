@@ -11,7 +11,7 @@ class DiscourseAccountCreationRequest extends AuthenticationRequest
 
     public function __construct()
     {
-        $this->description = wfMessage('discourseconnect-info-account-creation-description');
+        $this->description = wfMessage('dc-info-account-creation-description');
     }
     public function getFieldInfo()
     {
